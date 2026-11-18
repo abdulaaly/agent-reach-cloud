@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #08090A;
+  --card-bg: #F5F6F6;
+  --card-border: #E5E7EB;
+  --accent: #5E6AD2;
+}
+
+.dark {
+  --background: #010102;
+  --foreground: #F7F8F8;
+  --card-bg: #0F1011;
+  --card-border: #23252A;
+  --accent: #5E6AD2;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+  letter-spacing: -0.01em;
+}
+
+/* Linear-style surface panels with hairline borders */
+.linear-panel {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+}
+
+.linear-panel-elevated {
+  background: #141516;
+  border: 1px solid #34343A;
+  border-radius: 12px;
+}
+
+.light .linear-panel-elevated {
+  background: #F6F7F7;
+  border: 1px solid #D1D5DB;
+}
+
+/* Linear brand focus & accent */
+.brand-accent {
+  color: #5E6AD2;
+}
+
+.brand-button-primary {
+  background-color: #5E6AD2;
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.15s ease-in-out;
+}
+.brand-button-primary:hover {
+  background-color: #828FFF;
+}
+.brand-button-primary:active {
+  background-color: #5E69D1;
+}
+
+/* Typography tracking classes conforming to Linear DESIGN.md */
+.tracking-display-xl {
+  letter-spacing: -3.0px;
+}
+.tracking-display-lg {
+  letter-spacing: -1.8px;
+}
+.tracking-display-md {
+  letter-spacing: -1.0px;
+}
+.tracking-headline {
+  letter-spacing: -0.6px;
+}
+.tracking-card {
+  letter-spacing: -0.4px;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 145, 160, 0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 145, 160, 0.45);
+}
