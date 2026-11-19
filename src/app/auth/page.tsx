@@ -121,11 +121,6 @@ function AuthContent() {
     }
   };
 
-  const handleDemoLogin = async () => {
-    setLoading(true);
-    await handleAuthSuccess("demo@agent-reach.cloud", "Enterprise Demo User");
-  };
-
   return (
     <div className="w-full max-w-sm mx-auto p-4 sm:p-6">
       {/* Brand Header */}
@@ -305,19 +300,6 @@ function AuthContent() {
             )}
           </button>
         </form>
-
-        {/* Demo Fast Login */}
-        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-[#141516]">
-          <button
-            type="button"
-            onClick={handleDemoLogin}
-            disabled={loading}
-            className="w-full py-2 px-3 rounded-md text-xs font-medium bg-slate-100 dark:bg-[#141516] hover:bg-slate-200 dark:hover:bg-[#191a1b] text-slate-700 dark:text-[#d0d6e0] border border-slate-200 dark:border-[#23252a] transition flex items-center justify-center gap-1.5"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-[#5e6ad2]" />
-            <span>Fast 1-Click Demo Login (500 Credits Included)</span>
-          </button>
-        </div>
 
         {/* Toggle Sign Up / Sign In */}
         {!isOauthConsent && (
