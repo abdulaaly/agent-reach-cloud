@@ -89,6 +89,7 @@ export default function DashboardPage() {
   const [toppingUp, setToppingUp] = useState(false);
 
   // Live Tool Workbench
+  const [sessionKey, setSessionKey] = useState<string | null>(null);
   const [selectedChannel, setSelectedChannel] = useState("youtube");
   const [toolTarget, setToolTarget] = useState("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   const [toolResult, setToolResult] = useState<any>(null);
@@ -107,6 +108,14 @@ export default function DashboardPage() {
           setUser(data.user);
           setTokens(data.tokens || []);
           setStats(data.stats || null);
+          fetch(`/api/tokens?userId=${encodeURIComponent(userId)}`)
+            .then((r) => r.json())
+            .then((tokData) => {
+              if (tokData.sessionKey) {
+                setSessionKey(tokData.sessionKey);
+              }
+            })
+            .catch(() => {});
         } else {
           router.push("/auth");
         }
@@ -177,6 +186,10 @@ export default function DashboardPage() {
         setShowCreateModal(false);
         if (data.rawKey) {
           setCreatedRawKey(data.rawKey);
+          setSessionKey(data.rawKey);
+          if (typeof window !== "undefined") {
+            localStorage.setItem("agent_reach_active_key", data.rawKey);
+          }
         }
       }
     } catch (e) {
@@ -232,7 +245,12 @@ export default function DashboardPage() {
     setRunningTool(true);
     setToolResult(null);
 
-    const activeTok = tokens.find((t) => t.active)?.token || "ar_live_demo1234567890abcdef";
+    const activeTok =
+      sessionKey ||
+      createdRawKey ||
+      (typeof window !== "undefined" ? localStorage.getItem("agent_reach_active_key") : null) ||
+      tokens.find((t) => t.active)?.token ||
+      "";
 
     try {
       let toolName = "reach_read";
