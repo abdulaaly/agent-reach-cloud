@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { db } from "@/lib/db";
+import { db, signStatelessKey } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,8 @@ export async function GET(request: NextRequest) {
   }
 
   const tokens = db.getUserTokens(userId);
-  return new Response(JSON.stringify({ ok: true, tokens }), {
+  const sessionKey = signStatelessKey(userId, "Console Client");
+  return new Response(JSON.stringify({ ok: true, tokens, sessionKey }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
