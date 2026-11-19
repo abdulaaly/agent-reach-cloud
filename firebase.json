@@ -1,0 +1,17 @@
+{
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Agent-Reach Cloud",
+        "supportEmail": "100xdigitizer@gmail.com",
+        "authorizedRedirectUris": [
+          "https://agent-reach-cloud.vercel.app",
+          "https://agent-reach-cloud.vercel.app/auth",
+          "http://localhost:3000",
+          "http://localhost:3000/auth"
+        ]
+      }
+    }
+  }
+}
