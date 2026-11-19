@@ -95,11 +95,14 @@ export default function DashboardPage() {
   const [toolResult, setToolResult] = useState<any>(null);
   const [runningTool, setRunningTool] = useState(false);
 
-  const fetchUserData = (userId: string) => {
-    fetch(`/api/auth?userId=${encodeURIComponent(userId)}`)
+  const fetchUserData = (userId: string, email?: string) => {
+    const q = new URLSearchParams();
+    if (userId) q.set("userId", userId);
+    if (email) q.set("email", email);
+    fetch(`/api/auth?${q.toString()}`)
       .then((res) => {
         if (!res.ok) {
-          throw new Error("Session invalid");
+          throw new Error("Failed to load user data");
         }
         return res.json();
       })
@@ -108,23 +111,21 @@ export default function DashboardPage() {
           setUser(data.user);
           setTokens(data.tokens || []);
           setStats(data.stats || null);
-          fetch(`/api/tokens?userId=${encodeURIComponent(userId)}`)
+          fetch(`/api/tokens?userId=${encodeURIComponent(data.user.id)}`)
             .then((r) => r.json())
             .then((tokData) => {
               if (tokData.sessionKey) {
                 setSessionKey(tokData.sessionKey);
+                if (typeof window !== "undefined") {
+                  localStorage.setItem("agent_reach_active_key", tokData.sessionKey);
+                }
               }
             })
             .catch(() => {});
-        } else {
-          router.push("/auth");
         }
       })
-      .catch(() => {
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("agent_reach_session");
-        }
-        router.push("/auth");
+      .catch((err) => {
+        console.warn("User stats refresh note:", err);
       })
       .finally(() => setLoading(false));
   };
@@ -140,11 +141,11 @@ export default function DashboardPage() {
 
       try {
         const session = JSON.parse(raw);
-        if (!session.userId) {
+        if (!session.userId && !session.email) {
           router.push("/auth");
           return;
         }
-        fetchUserData(session.userId);
+        fetchUserData(session.userId, session.email);
       } catch (e) {
         router.push("/auth");
       }
@@ -293,7 +294,7 @@ export default function DashboardPage() {
       const json = await res.json();
       setToolResult(json);
       if (user) {
-        fetchUserData(user.id);
+        fetchUserData(user.id, user.email);
       }
     } catch (err: any) {
       setToolResult({ error: err.message });

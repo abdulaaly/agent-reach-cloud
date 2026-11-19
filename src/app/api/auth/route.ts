@@ -82,15 +82,20 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get("userId");
+  const email = searchParams.get("email");
 
-  if (!userId) {
+  if (!userId && !email) {
     return new Response(
-      JSON.stringify({ ok: false, error: "Missing required userId parameter" }),
-      { status: 401, headers: { "Content-Type": "application/json" } }
+      JSON.stringify({ ok: false, error: "Missing required userId or email parameter" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  const user = db.getUser(userId);
+  let user = userId ? db.getUser(userId) : null;
+  if (!user && email) {
+    user = db.getOrCreateUser(email);
+  }
+
   if (!user) {
     return new Response(
       JSON.stringify({ ok: false, error: "User session not found" }),
@@ -98,8 +103,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const tokens = db.getUserTokens(userId);
-  const stats = db.getStats(userId);
+  const tokens = db.getUserTokens(user.id);
+  const stats = db.getStats(user.id);
 
   return new Response(
     JSON.stringify({ ok: true, user, tokens, stats }),

@@ -196,7 +196,11 @@ export const db = {
   // --- User Management ---
   getUser(userId: string): User | null {
     const data = ensureDb();
-    return data.users[userId] || null;
+    if (data.users[userId]) return data.users[userId];
+    if (userId.startsWith("usr_")) {
+      return this.getOrCreateUserById(userId);
+    }
+    return null;
   },
 
   getUserByEmail(email: string): User | null {
@@ -205,13 +209,29 @@ export const db = {
     return Object.values(data.users).find((u) => u.email.toLowerCase() === normalized) || null;
   },
 
+  getOrCreateUserById(userId: string): User {
+    const data = ensureDb();
+    if (data.users[userId]) return data.users[userId];
+    const user: User = {
+      id: userId,
+      email: `${userId}@agent-reach.cloud`,
+      name: userId,
+      computeUnits: 500,
+      tier: "free",
+      createdAt: new Date().toISOString(),
+    };
+    data.users[userId] = user;
+    persistDb();
+    return user;
+  },
+
   createUser(email: string, name?: string, passwordHash?: string): User {
     const data = ensureDb();
     const normalized = email.toLowerCase().trim();
-    const existing = Object.values(data.users).find((u) => u.email.toLowerCase() === normalized);
+    const id = "usr_" + crypto.createHash("sha256").update(normalized).digest("hex").substring(0, 16);
+    const existing = data.users[id] || Object.values(data.users).find((u) => u.email.toLowerCase() === normalized);
     if (existing) return existing;
 
-    const id = "usr_" + crypto.randomBytes(8).toString("hex");
     const user: User = {
       id,
       email: normalized,
