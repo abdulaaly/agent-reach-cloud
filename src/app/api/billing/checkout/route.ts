@@ -15,9 +15,12 @@ export async function POST(request: NextRequest) {
     }
 
     const targetUserId = userId || "user_demo_01";
-    const user = db.getUser(targetUserId);
+    let user = db.getUser(targetUserId);
     if (!user) {
-      return new Response(JSON.stringify({ ok: false, error: "User not found." }), { status: 404 });
+      user = db.createUser(
+        targetUserId.includes("@") ? targetUserId : `${targetUserId}@agent-reach.cloud`,
+        "Cloud Subscriber"
+      );
     }
 
     // If running in development / test / simulated checkout mode:
