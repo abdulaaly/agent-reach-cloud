@@ -84,8 +84,42 @@ interface DatabaseSchema {
   transactions: Transaction[];
 }
 
-const DB_DIR = path.join(process.cwd(), ".data");
+const DB_DIR = process.env.VERCEL
+  ? path.join("/tmp", ".data")
+  : path.join(process.cwd(), ".data");
 const DB_FILE = path.join(DB_DIR, "agent_reach_cloud.json");
+
+const TOKEN_SECRET = process.env.AUTH_SECRET || "agent_reach_enterprise_jwt_hmac_secret_2026";
+
+export function signStatelessKey(userId: string, label: string, type: "live" | "oauth" = "live"): string {
+  const payload = Buffer.from(JSON.stringify({ u: userId, l: label, t: Date.now() })).toString("base64url");
+  const sig = crypto.createHmac("sha256", TOKEN_SECRET).update(payload).digest("hex").substring(0, 24);
+  return `ar_${type}_${payload}_${sig}`;
+}
+
+export function verifyStatelessKey(rawTokenStr: string): { userId: string; label: string; type: string } | null {
+  if (!rawTokenStr.startsWith("ar_live_") && !rawTokenStr.startsWith("ar_oauth_")) {
+    return null;
+  }
+  const isOAuth = rawTokenStr.startsWith("ar_oauth_");
+  const prefix = isOAuth ? "ar_oauth_" : "ar_live_";
+  const rest = rawTokenStr.substring(prefix.length);
+  const lastUnderscore = rest.lastIndexOf("_");
+  if (lastUnderscore <= 0) return null;
+
+  const payload = rest.substring(0, lastUnderscore);
+  const sig = rest.substring(lastUnderscore + 1);
+
+  const expectedSig = crypto.createHmac("sha256", TOKEN_SECRET).update(payload).digest("hex").substring(0, 24);
+  if (sig !== expectedSig) return null;
+
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
+    return { userId: data.u, label: data.l, type: isOAuth ? "oauth" : "live" };
+  } catch {
+    return null;
+  }
+}
 
 let memoryDb: DatabaseSchema | null = null;
 
@@ -183,27 +217,45 @@ export const db = {
       email: normalized,
       name: name || normalized.split("@")[0],
       passwordHash,
-      computeUnits: 500, // 500 free welcome units
-      tier: "starter",
+      computeUnits: 500, // 500 free starting units
+      tier: "free",
       createdAt: new Date().toISOString(),
     };
-    data.users[id] = user;
 
-    // Generate initial API Key
-    const rawKey = `ar_live_${crypto.randomBytes(24).toString("hex")}`;
-    const keyHash = hashString(rawKey);
-    const tokenId = "tok_" + crypto.randomBytes(6).toString("hex");
-    const token: ApiToken = {
-      id: tokenId,
-      userId: id,
-      keyPrefix: rawKey.substring(0, 12),
-      keyHash,
-      label: "Default API Key",
-      active: true,
+    data.users[id] = user;
+    persistDb();
+    return user;
+  },
+
+  updateUserUnits(userId: string, delta: number): User | null {
+    const data = ensureDb();
+    const user = data.users[userId];
+    if (!user) return null;
+    user.computeUnits = Math.max(0, user.computeUnits + delta);
+    persistDb();
+    return user;
+  },
+
+  addCredits(userId: string, amount: number, orderId: string, amountCents: number, tier: string): User | null {
+    const data = ensureDb();
+    const user = data.users[userId];
+    if (!user) return null;
+
+    user.computeUnits += amount;
+    if (tier === "pro" || tier === "agency") {
+      user.tier = tier as any;
+    }
+
+    const tx: Transaction = {
+      id: "tx_" + crypto.randomBytes(6).toString("hex"),
+      userId,
+      orderId,
+      amountCents,
+      creditsAdded: amount,
+      tier,
       createdAt: new Date().toISOString(),
-      requestCount: 0,
     };
-    data.tokens[tokenId] = token;
+    data.transactions.push(tx);
 
     persistDb();
     return user;
@@ -223,14 +275,14 @@ export const db = {
 
   createToken(userId: string, label: string): { token: ApiToken; rawKey: string } {
     const data = ensureDb();
-    const rawKey = `ar_live_${crypto.randomBytes(24).toString("hex")}`;
+    const rawKey = signStatelessKey(userId, label.trim() || "Remote MCP Key", "live");
     const keyHash = hashString(rawKey);
     const tokenId = "tok_" + crypto.randomBytes(6).toString("hex");
 
     const token: ApiToken = {
       id: tokenId,
       userId,
-      keyPrefix: rawKey.substring(0, 12),
+      keyPrefix: rawKey.substring(0, 16),
       keyHash,
       label: label.trim() || "Remote MCP Key",
       active: true,
@@ -301,7 +353,46 @@ export const db = {
       return { valid: true, user, isOAuth: true };
     }
 
-    // 3. For backward compatibility with tests/development token format
+    // 3. Stateless Signed Token Verification (Resilient across multi-tenant Serverless Lambdas)
+    const verified = verifyStatelessKey(rawTokenStr.trim());
+    if (verified) {
+      let user = data.users[verified.userId];
+      if (!user) {
+        user = {
+          id: verified.userId,
+          email: verified.userId.includes("@") ? verified.userId : `${verified.userId}@agent-reach.cloud`,
+          name: verified.label || "Cloud Developer",
+          computeUnits: 500,
+          tier: "pro",
+          createdAt: new Date().toISOString(),
+        };
+        data.users[verified.userId] = user;
+      }
+      if (user.computeUnits <= 0) {
+        return { valid: false, reason: "Compute balance depleted. Please top up credits.", user };
+      }
+
+      const isOAuth = verified.type === "oauth";
+      const tokenId = "tok_" + targetHash.substring(0, 10);
+      let token = data.tokens[tokenId];
+      if (!token) {
+        token = {
+          id: tokenId,
+          userId: verified.userId,
+          keyPrefix: rawTokenStr.substring(0, 16),
+          keyHash: targetHash,
+          label: verified.label,
+          active: true,
+          createdAt: new Date().toISOString(),
+          requestCount: 0,
+        };
+        data.tokens[tokenId] = token;
+      }
+      persistDb();
+      return { valid: true, user, token, isOAuth };
+    }
+
+    // 4. For backward compatibility with tests/development token format
     const legacyToken = Object.values(data.tokens).find((t) => (t as any).token === rawTokenStr);
     if (legacyToken && legacyToken.active) {
       const user = data.users[legacyToken.userId];
@@ -335,23 +426,23 @@ export const db = {
     return data.oauthClients[clientId] || null;
   },
 
-  createOAuthCode(params: {
-    userId: string;
-    clientId: string;
-    redirectUri: string;
-    codeChallenge?: string;
-    codeChallengeMethod?: "S256" | "plain";
-  }): string {
+  issueOAuthCode(
+    userId: string,
+    clientId: string,
+    redirectUri: string,
+    codeChallenge?: string,
+    codeChallengeMethod?: "S256" | "plain"
+  ): string {
     const data = ensureDb();
-    const code = "ac_" + crypto.randomBytes(18).toString("hex");
+    const code = "code_" + crypto.randomBytes(16).toString("hex");
     data.oauthCodes[code] = {
       code,
-      userId: params.userId,
-      clientId: params.clientId,
-      redirectUri: params.redirectUri,
-      codeChallenge: params.codeChallenge,
-      codeChallengeMethod: params.codeChallengeMethod || "S256",
-      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes validity
+      userId,
+      clientId,
+      redirectUri,
+      codeChallenge,
+      codeChallengeMethod,
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
     };
     persistDb();
     return code;
@@ -369,7 +460,7 @@ export const db = {
 
   issueOAuthToken(userId: string, clientId: string, scope: string = "mcp:tools"): string {
     const data = ensureDb();
-    const rawToken = "ar_oauth_" + crypto.randomBytes(24).toString("hex");
+    const rawToken = signStatelessKey(userId, clientId, "oauth");
     const tokenHash = hashString(rawToken);
 
     data.oauthTokens[tokenHash] = {
@@ -431,107 +522,68 @@ export const db = {
     const data = ensureDb();
     const user = data.users[userId];
     if (!user) return { success: false, remaining: 0 };
-    if (user.computeUnits < amount) {
-      return { success: false, remaining: user.computeUnits };
-    }
-    user.computeUnits = Math.max(0, user.computeUnits - amount);
-    persistDb();
-    return { success: true, remaining: user.computeUnits };
-  },
+    if (user.computeUnits < amount) return { success: false, remaining: user.computeUnits };
 
-  recordAuditLog(params: {
-    userId: string;
-    tokenId?: string;
-    toolName: string;
-    unitsCharged: number;
-    status: "success" | "error" | "rejected_quota";
-    latencyMs?: number;
-    metadata?: any;
-  }) {
-    const data = ensureDb();
-    if (params.tokenId) {
-      const token = data.tokens[params.tokenId] || Object.values(data.tokens).find((t) => t.id === params.tokenId);
+    user.computeUnits -= amount;
+    if (tokenId) {
+      const token = data.tokens[tokenId];
       if (token) {
         token.requestCount = (token.requestCount || 0) + 1;
         token.lastUsedAt = new Date().toISOString();
       }
     }
+    persistDb();
+    return { success: true, remaining: user.computeUnits };
+  },
 
+  logUsage(
+    userId: string,
+    toolName: string,
+    channel: string,
+    computeCost: number,
+    durationMs: number,
+    status: "success" | "rate_limited" | "error" = "success",
+    tokenId?: string,
+    querySummary?: string
+  ): UsageLog {
+    const data = ensureDb();
     const log: UsageLog = {
       id: "log_" + crypto.randomBytes(5).toString("hex"),
-      userId: params.userId,
-      tokenId: params.tokenId,
-      toolName: params.toolName,
-      channel: params.metadata?.channel || params.toolName.split("_")[0] || "reach",
-      computeCost: params.unitsCharged,
-      durationMs: params.latencyMs || 200,
-      status: params.status === "rejected_quota" ? "error" : params.status,
+      userId,
+      tokenId,
+      toolName,
+      channel,
+      computeCost,
+      durationMs,
+      status,
       timestamp: new Date().toISOString(),
-      querySummary: params.metadata?.reason || undefined,
+      querySummary,
     };
-
     data.usageLogs.unshift(log);
     if (data.usageLogs.length > 200) {
       data.usageLogs = data.usageLogs.slice(0, 200);
     }
     persistDb();
+    return log;
   },
 
-  getUsageLogs(userId: string, limit: number = 50): UsageLog[] {
+  getUserUsageLogs(userId: string, limit = 50): UsageLog[] {
     const data = ensureDb();
     return data.usageLogs.filter((l) => l.userId === userId).slice(0, limit);
   },
 
-  addCredits(
-    userId: string,
-    amount: number,
-    orderId: string,
-    amountCents: number = 0,
-    tier: string = "topup"
-  ): User | null {
+  getUserStats(userId: string) {
     const data = ensureDb();
     const user = data.users[userId];
-    if (!user) return null;
-
-    user.computeUnits += amount;
-    if (tier && tier !== "topup") {
-      user.tier = tier as any;
-    }
-
-    data.transactions.push({
-      id: "txn_" + crypto.randomBytes(5).toString("hex"),
-      userId,
-      orderId,
-      amountCents,
-      creditsAdded: amount,
-      tier,
-      createdAt: new Date().toISOString(),
-    });
-
-    persistDb();
-    return user;
-  },
-
-  getStats(userId: string) {
-    const data = ensureDb();
-    const user = data.users[userId];
-    if (!user) return null;
-
     const userLogs = data.usageLogs.filter((l) => l.userId === userId);
     const totalRequests = userLogs.length;
-    const totalComputeUsed = userLogs.reduce((acc, l) => acc + l.computeCost, 0);
-
-    const platformBreakdown: Record<string, number> = {};
-    for (const log of userLogs) {
-      platformBreakdown[log.channel] = (platformBreakdown[log.channel] || 0) + 1;
-    }
+    const totalComputeUsed = userLogs.reduce((acc, l) => acc + (l.computeCost || 0), 0);
 
     return {
-      computeBalance: user.computeUnits,
-      tier: user.tier,
+      computeBalance: user ? user.computeUnits : 0,
+      tier: user ? user.tier : "free",
       totalRequests,
       totalComputeUsed,
-      platformBreakdown,
       recentLogs: userLogs.slice(0, 10),
     };
   },
