@@ -6,6 +6,7 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  updateProfile,
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -13,12 +14,12 @@ import {
 } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDemoDummyApiKeyForAgentReachCloud123",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "agent-reach-cloud.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "agent-reach-cloud",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "agent-reach-cloud.appspot.com",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "123456789012",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:123456789012:web:abcdef123456",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyBcL_aRYm2RJsvAFAvS39_xA7-4fYaPkFE",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "promising-env-470506-p9.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "promising-env-470506-p9",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "promising-env-470506-p9.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "46000911784",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:46000911784:web:4705b3d492756bcbf3999d",
 };
 
 let app: FirebaseApp;
@@ -38,120 +39,54 @@ export function getFirebaseAuth(): Auth | null {
     }
     return auth;
   } catch (err) {
-    console.warn("Firebase client initialization in mock/safe mode:", err);
+    console.error("Firebase client initialization error:", err);
     return null;
   }
 }
 
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+
 export const githubProvider = new GithubAuthProvider();
 
 export async function loginWithGoogle() {
   const authInstance = getFirebaseAuth();
   if (!authInstance) {
-    // Simulated demo login fallback
-    return {
-      user: {
-        uid: "usr_google_" + Math.random().toString(36).substring(2, 9),
-        email: "google.user@example.com",
-        displayName: "Google Verified Researcher",
-      },
-    };
+    throw new Error("Firebase authentication service is not initialized.");
   }
-
-  try {
-    const cred = await signInWithPopup(authInstance, googleProvider);
-    return cred;
-  } catch (err: any) {
-    console.warn("Firebase Google login error, using safe fallback:", err.message);
-    return {
-      user: {
-        uid: "usr_google_demo",
-        email: "google.user@example.com",
-        displayName: "Google Verified Researcher",
-      },
-    };
-  }
+  return await signInWithPopup(authInstance, googleProvider);
 }
 
 export async function loginWithGithub() {
   const authInstance = getFirebaseAuth();
   if (!authInstance) {
-    return {
-      user: {
-        uid: "usr_gh_" + Math.random().toString(36).substring(2, 9),
-        email: "github.developer@example.com",
-        displayName: "GitHub AI Architect",
-      },
-    };
+    throw new Error("Firebase authentication service is not initialized.");
   }
-
-  try {
-    const cred = await signInWithPopup(authInstance, githubProvider);
-    return cred;
-  } catch (err: any) {
-    console.warn("Firebase GitHub login error, using safe fallback:", err.message);
-    return {
-      user: {
-        uid: "usr_gh_demo",
-        email: "github.developer@example.com",
-        displayName: "GitHub AI Architect",
-      },
-    };
-  }
+  return await signInWithPopup(authInstance, githubProvider);
 }
 
 export async function loginWithEmail(email: string, pass: string) {
   const authInstance = getFirebaseAuth();
   if (!authInstance) {
-    return {
-      user: {
-        uid: "usr_email_" + Math.random().toString(36).substring(2, 9),
-        email,
-        displayName: email.split("@")[0],
-      },
-    };
+    throw new Error("Firebase authentication service is not initialized.");
   }
-
-  try {
-    const cred = await signInWithEmailAndPassword(authInstance, email, pass);
-    return cred;
-  } catch (err: any) {
-    // If not found or API dummy, succeed as demo account
-    return {
-      user: {
-        uid: "usr_" + Math.random().toString(36).substring(2, 9),
-        email,
-        displayName: email.split("@")[0],
-      },
-    };
-  }
+  return await signInWithEmailAndPassword(authInstance, email.trim(), pass);
 }
 
 export async function signupWithEmail(email: string, pass: string, name?: string) {
   const authInstance = getFirebaseAuth();
   if (!authInstance) {
-    return {
-      user: {
-        uid: "usr_email_" + Math.random().toString(36).substring(2, 9),
-        email,
-        displayName: name || email.split("@")[0],
-      },
-    };
+    throw new Error("Firebase authentication service is not initialized.");
   }
-
-  try {
-    const cred = await createUserWithEmailAndPassword(authInstance, email, pass);
-    return cred;
-  } catch (err: any) {
-    return {
-      user: {
-        uid: "usr_" + Math.random().toString(36).substring(2, 9),
-        email,
-        displayName: name || email.split("@")[0],
-      },
-    };
+  const userCredential = await createUserWithEmailAndPassword(authInstance, email.trim(), pass);
+  if (name && userCredential.user) {
+    try {
+      await updateProfile(userCredential.user, { displayName: name });
+    } catch (e) {
+      console.warn("Failed to update profile name:", e);
+    }
   }
+  return userCredential;
 }
 
 export async function logoutUser() {
@@ -159,9 +94,14 @@ export async function logoutUser() {
   if (authInstance) {
     try {
       await signOut(authInstance);
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Error signing out from Firebase:", e);
+    }
   }
   if (typeof window !== "undefined") {
     localStorage.removeItem("agent_reach_session");
   }
 }
+
+export { onAuthStateChanged };
+export type { FirebaseUser };

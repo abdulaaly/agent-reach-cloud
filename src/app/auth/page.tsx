@@ -33,6 +33,29 @@ function AuthContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const formatFirebaseError = (err: any): string => {
+    const code = err?.code || "";
+    if (code === "auth/invalid-credential" || code === "auth/wrong-password") {
+      return "Incorrect email or password. Please try again.";
+    }
+    if (code === "auth/user-not-found") {
+      return "No account exists with this email. Please click 'Create One Free'.";
+    }
+    if (code === "auth/email-already-in-use") {
+      return "This email is already registered. Please sign in instead.";
+    }
+    if (code === "auth/weak-password") {
+      return "Password should be at least 6 characters.";
+    }
+    if (code === "auth/popup-closed-by-user") {
+      return "Sign-in popup was closed before completing.";
+    }
+    if (code === "auth/unauthorized-domain") {
+      return "Domain not authorized in Firebase Console. Please sign in with email/password.";
+    }
+    return err?.message || "Authentication error occurred.";
+  };
+
   const handleAuthSuccess = async (userEmail: string, userName?: string) => {
     try {
       const res = await fetch("/api/auth", {
@@ -41,7 +64,10 @@ function AuthContent() {
         body: JSON.stringify({ email: userEmail, name: userName }),
       });
       const data = await res.json();
-      const userId = data.user?.id || "user_demo_01";
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to sync user session.");
+      }
+      const userId = data.user?.id || "user_" + Math.random().toString(36).substring(2, 9);
 
       if (typeof window !== "undefined") {
         localStorage.setItem(
@@ -84,11 +110,11 @@ function AuthContent() {
       } else {
         const res = await loginWithEmail(email, password);
         if (res?.user?.email) {
-          await handleAuthSuccess(res.user.email);
+          await handleAuthSuccess(res.user.email, res.user.displayName || undefined);
         }
       }
     } catch (err: any) {
-      setError(err.message || "Authentication failed");
+      setError(formatFirebaseError(err));
       setLoading(false);
     }
   };
@@ -102,7 +128,7 @@ function AuthContent() {
         await handleAuthSuccess(res.user.email, res.user.displayName || undefined);
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(formatFirebaseError(err));
       setLoading(false);
     }
   };
@@ -116,7 +142,7 @@ function AuthContent() {
         await handleAuthSuccess(res.user.email, res.user.displayName || undefined);
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(formatFirebaseError(err));
       setLoading(false);
     }
   };
@@ -300,6 +326,8 @@ function AuthContent() {
             )}
           </button>
         </form>
+
+
 
         {/* Toggle Sign Up / Sign In */}
         {!isOauthConsent && (
