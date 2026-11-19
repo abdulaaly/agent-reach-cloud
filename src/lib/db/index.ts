@@ -236,31 +236,6 @@ export const db = {
     return user;
   },
 
-  addCredits(userId: string, amount: number, orderId: string, amountCents: number, tier: string): User | null {
-    const data = ensureDb();
-    const user = data.users[userId];
-    if (!user) return null;
-
-    user.computeUnits += amount;
-    if (tier === "pro" || tier === "agency") {
-      user.tier = tier as any;
-    }
-
-    const tx: Transaction = {
-      id: "tx_" + crypto.randomBytes(6).toString("hex"),
-      userId,
-      orderId,
-      amountCents,
-      creditsAdded: amount,
-      tier,
-      createdAt: new Date().toISOString(),
-    };
-    data.transactions.push(tx);
-
-    persistDb();
-    return user;
-  },
-
   getOrCreateUser(email: string, name?: string): User {
     const user = this.getUserByEmail(email);
     if (user) return user;
@@ -426,22 +401,22 @@ export const db = {
     return data.oauthClients[clientId] || null;
   },
 
-  issueOAuthCode(
-    userId: string,
-    clientId: string,
-    redirectUri: string,
-    codeChallenge?: string,
-    codeChallengeMethod?: "S256" | "plain"
-  ): string {
+  createOAuthCode(params: {
+    userId: string;
+    clientId: string;
+    redirectUri: string;
+    codeChallenge?: string;
+    codeChallengeMethod?: "S256" | "plain";
+  }): string {
     const data = ensureDb();
     const code = "code_" + crypto.randomBytes(16).toString("hex");
     data.oauthCodes[code] = {
       code,
-      userId,
-      clientId,
-      redirectUri,
-      codeChallenge,
-      codeChallengeMethod,
+      userId: params.userId,
+      clientId: params.clientId,
+      redirectUri: params.redirectUri,
+      codeChallenge: params.codeChallenge,
+      codeChallengeMethod: params.codeChallengeMethod,
       expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
     };
     persistDb();
@@ -536,54 +511,109 @@ export const db = {
     return { success: true, remaining: user.computeUnits };
   },
 
-  logUsage(
-    userId: string,
-    toolName: string,
-    channel: string,
-    computeCost: number,
-    durationMs: number,
-    status: "success" | "rate_limited" | "error" = "success",
-    tokenId?: string,
-    querySummary?: string
-  ): UsageLog {
+  recordAuditLog(params: {
+    userId: string;
+    tokenId?: string;
+    toolName: string;
+    unitsCharged: number;
+    status: "success" | "error" | "rejected_quota";
+    latencyMs?: number;
+    metadata?: any;
+  }) {
     const data = ensureDb();
+    const user = data.users[params.userId];
+    if (user) {
+      user.computeUnits = Math.max(0, user.computeUnits - params.unitsCharged);
+    }
+
+    if (params.tokenId) {
+      const token = data.tokens[params.tokenId];
+      if (token) {
+        token.requestCount = (token.requestCount || 0) + 1;
+        token.lastUsedAt = new Date().toISOString();
+      }
+    }
+
     const log: UsageLog = {
       id: "log_" + crypto.randomBytes(5).toString("hex"),
-      userId,
-      tokenId,
-      toolName,
-      channel,
-      computeCost,
-      durationMs,
-      status,
+      userId: params.userId,
+      tokenId: params.tokenId,
+      toolName: params.toolName,
+      channel: params.metadata?.channel || "mcp",
+      computeCost: params.unitsCharged,
+      durationMs: params.latencyMs || 150,
+      status: params.status === "rejected_quota" ? "rate_limited" : params.status,
       timestamp: new Date().toISOString(),
-      querySummary,
+      querySummary: params.metadata?.target || params.metadata?.query || undefined,
     };
+
     data.usageLogs.unshift(log);
     if (data.usageLogs.length > 200) {
       data.usageLogs = data.usageLogs.slice(0, 200);
     }
+
     persistDb();
-    return log;
   },
 
-  getUserUsageLogs(userId: string, limit = 50): UsageLog[] {
+  getUsageLogs(userId: string, limit: number = 50): UsageLog[] {
     const data = ensureDb();
     return data.usageLogs.filter((l) => l.userId === userId).slice(0, limit);
   },
 
-  getUserStats(userId: string) {
+  addCredits(
+    userId: string,
+    amount: number,
+    orderId: string,
+    amountCents: number = 0,
+    tier: string = "topup"
+  ): User | null {
     const data = ensureDb();
     const user = data.users[userId];
+    if (!user) return null;
+
+    user.computeUnits += amount;
+    if (tier && tier !== "topup") {
+      user.tier = tier as any;
+    }
+
+    data.transactions.push({
+      id: "txn_" + crypto.randomBytes(5).toString("hex"),
+      userId,
+      orderId,
+      amountCents,
+      creditsAdded: amount,
+      tier,
+      createdAt: new Date().toISOString(),
+    });
+
+    persistDb();
+    return user;
+  },
+
+  getUserStats(userId: string) {
+    return this.getStats(userId);
+  },
+
+  getStats(userId: string) {
+    const data = ensureDb();
+    const user = data.users[userId];
+    if (!user) return null;
+
     const userLogs = data.usageLogs.filter((l) => l.userId === userId);
     const totalRequests = userLogs.length;
-    const totalComputeUsed = userLogs.reduce((acc, l) => acc + (l.computeCost || 0), 0);
+    const totalComputeUsed = userLogs.reduce((acc, l) => acc + l.computeCost, 0);
+
+    const platformBreakdown: Record<string, number> = {};
+    for (const log of userLogs) {
+      platformBreakdown[log.channel] = (platformBreakdown[log.channel] || 0) + 1;
+    }
 
     return {
-      computeBalance: user ? user.computeUnits : 0,
-      tier: user ? user.tier : "free",
+      computeBalance: user.computeUnits,
+      tier: user.tier,
       totalRequests,
       totalComputeUsed,
+      platformBreakdown,
       recentLogs: userLogs.slice(0, 10),
     };
   },
